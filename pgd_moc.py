@@ -276,10 +276,9 @@ def pgd_moc(
         log_TX = np.log(TX_)
         log_step = (log_TX - log_qX) / (nbins - 1)
 
-        tgrid = np.exp(log_qX + np.arange(nbins) * log_step)
-    
-        tgrid[0] = qX_
-        tgrid[-1] = TX_
+        t_values = np.exp(log_qX + np.arange(nbins) * log_step)
+        t_values[0] = qX_
+        t_values[-1] = TX_
         
     
     p_moc = []
