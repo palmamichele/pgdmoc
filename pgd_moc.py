@@ -1,6 +1,34 @@
 import torch
 import numpy as np
 
+# class PGD_MOC:
+#     def __init__(self, model, dy_f, clipping_f, norm, t_values=None, step_size=None, numiter=1, numrestarts=1, nbins=100):
+#         self.model = model
+#         self.dy_f = dy_f
+#         self.clipping_f = clipping_f
+#         self.norm = norm
+#         self.t_values = t_values
+#         self.step_size = step_size
+#         self.numiter = numiter
+#         self.numrestarts = numrestarts
+#         self.nbins = nbins
+
+
+#     def compute_moc(self, X, Y):
+#         return pgd_moc(
+#             self.model,
+#             X,
+#             Y,
+#             self.dy_f,
+#             self.clipping_f,
+#             self.norm,
+#             self.t_values,
+#             self.step_size,
+#             self.numiter,
+#             self.numrestarts,
+#             self.nbins
+#         )
+
 
 def project_linf(x, a, epsilon):
     """
@@ -284,4 +312,4 @@ def pgd_moc(
 
         p_moc.append(max_mx)
 
-    return np.array(p_moc)
+    return np.array(p_moc), np.array(t_values)
