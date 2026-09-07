@@ -2,7 +2,6 @@ import torch
 import numpy as np
 
 
-
 def project_linf(x, a, epsilon):
     """
     Project point x onto the L_infty ball centered at a with radius epsilon
@@ -212,10 +211,11 @@ def pgd_moc(
     dy_f, #d_Y as loss function (assuming it satisfies metric properties)
     clipping_f,
     norm, #L2, L1, Linf
-    t_values, #t_1,...,t_K
+    t_values=None, #t_1,...,t_K
     step_size=None, 
     numiter=1,
-    numrestarts=1
+    numrestarts=1,
+    nbins=100
 ):
     """
     Approximate
@@ -226,7 +226,34 @@ def pgd_moc(
 
     X: torch.Tensor of shape (n_points, n_features) shall be the entire reference set.
     """
+    #put lower and upper bounds on the grid, and number of bins
 
+    if norm=="L1":
+        p=1
+    elif norm=="L2":
+        p=2
+    elif norm=="Linf":
+        p=np.inf
+    else:
+        raise Exception(f"Sorry, no implementation for the specified norm: {norm}")
+
+    
+    if t_values is None:
+        #by default we use a logarithmically spaced grid
+        delta = X.max(dim=0).values - X.min(dim=0).values
+        TX_ = torch.linalg.vector_norm(delta, ord=p).item()
+        qX_ = np.nextafter(0, 1)
+    
+        log_qX = np.log(qX_)
+        log_TX = np.log(TX_)
+        log_step = (log_TX - log_qX) / (nbins - 1)
+
+        tgrid = np.exp(log_qX + np.arange(nbins) * log_step)
+    
+        tgrid[0] = qX_
+        tgrid[-1] = TX_
+        
+    
     p_moc = []
 
     for k, t in enumerate(t_values):
