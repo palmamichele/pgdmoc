@@ -62,10 +62,3 @@ make
 cd .. 
 ```  
 
-
-## Usage
-Grant permission and run the .sh script for reproducing paper results
-```bash
-chmod +x run.sh
-./run.sh
-```  

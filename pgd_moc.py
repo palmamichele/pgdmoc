@@ -34,7 +34,6 @@ def project_linf(x, a, epsilon):
     """
     Project point x onto the L_infty ball centered at a with radius epsilon
     """
-
     return torch.clamp(x, a - epsilon, a + epsilon)
 
 
@@ -75,6 +74,7 @@ def initialize_perturbation(x,t, norm):
             -1, *([1] * (x.ndim - 1))
         )
 
+        #return torch.zeros_like(x)
         return delta
 
         
@@ -92,7 +92,7 @@ def initialize_perturbation(x,t, norm):
 #     return torch.clamp(x, a,b)
 
 
-
+#check independence assumption of obs in the batch
 def pgd_m_x(
     model,
     x,
@@ -103,11 +103,12 @@ def pgd_m_x(
     clipping_f,
     M=40,
     step_size=None,
-    n_restarts=1,
+    n_restarts=1
 ):
     """
-    x: a datapoint assumed to be in set S.
-    y: single datapoint, can be either network output on x, or original label value for x 
+    x: a batch of datapoints assumed to be in set S.
+    
+    y: a batch of datapoints, can be either network output on x i.e. model(x), or original label value for x 
     
     dy_f: needs to return per-example values.
 
@@ -120,15 +121,6 @@ def pgd_m_x(
 
     
     """
-
-    def per_sample_loss(logits, y, criterion):
-        losses = []
-
-        for i in range(logits.shape[0]):
-            loss = criterion(logits[i:i+1], y[i:i+1])
-            losses.append(loss.squeeze())
-
-        return torch.stack(losses)
 
 
     if norm=="L1":
@@ -146,20 +138,25 @@ def pgd_m_x(
 
 
     if t == 0:
-        return 0.0, torch.zeros_like(x)
+        B = x.shape[0]
+        return (
+            torch.zeros(B, device=x.device, dtype=x.dtype),
+            torch.zeros_like(x),
+        )
 
     if step_size is None:
         step_size = t / 10.0
 
+    B = x.shape[0]
+
     #network pars are fixed throughout the optimization
     best_value = torch.full(
-    (x.shape[0],),
+    (B,),
     -float("inf"),
     device=x.device,
     dtype=x.dtype
     )
 
-    best_delta = None
     best_delta = torch.zeros_like(x)
     
 
@@ -167,7 +164,7 @@ def pgd_m_x(
 
         #initialize the adv perturbation, based on the norm type 
         delta = initialize_perturbation(x,t,norm)
-        delta.requires_grad_(True)
+        delta= delta.detach().requires_grad_(True)
         #zero_center = torch.zeros_like(delta)
 
 
@@ -177,23 +174,26 @@ def pgd_m_x(
             adv_output = model(adv_x)
          
             #adv_x.requires_grad_(True)
-            objective = per_sample_loss(
-                adv_output,
-                y,
-                dy_f
-            )
+            objective = dy_f(adv_output,y) #should return shape (B,)
+
+            if objective.ndim != 1 or objective.shape[0] != B:
+                raise ValueError(
+                    f"dy_f must return shape ({B},), "
+                    f"got {tuple(objective.shape)}"
+                )
 
             grad = torch.autograd.grad(
                 objective.sum(),
                 delta
             )[0]
 
+            #gradient of each example's objective w.r.t. its own delta assuming examples are independent
 
             #gradient step update based on the specific norm, returns updated delta.
             if norm == "L2":
                 grad_norm = grad.flatten(1).norm(p=2, dim=1, keepdim=True)
                 grad_normalized = grad / (
-                    grad_norm.view(-1, *([1] * (grad.ndim - 1))) + 1e-12
+                    grad_norm.view(B, *([1] * (grad.ndim - 1))) + 1e-12
                 )
                 
                 delta = delta + step_size * grad_normalized
@@ -215,12 +215,7 @@ def pgd_m_x(
         with torch.no_grad():
             adv_x = clipping_f(x + delta)
             delta = adv_x - x
-
-            value = per_sample_loss(
-                model(adv_x),
-                y,
-                dy_f
-            )
+            value = dy_f(model(adv_x), y)
 
 
    
@@ -243,7 +238,8 @@ def pgd_moc(
     step_size=None, 
     numiter=1,
     numrestarts=1,
-    nbins=100
+    nbins=100,
+    batch_size=1
 ):
     """
     Approximate
@@ -287,10 +283,10 @@ def pgd_moc(
 
         max_mx = 0.0
 
-        for i in range(X.shape[0]):
+        for i in range(0,X.shape[0], batch_size):
 
-            x = X[i:i+1]
-            y = Y[i:i+1]
+            x = X[i:i+batch_size]
+            y = Y[i:i+batch_size]
 
             mx, delta = pgd_m_x(
                 model,
@@ -301,10 +297,11 @@ def pgd_moc(
                 norm,
                 clipping_f,
                 numiter,
-                step_size,numrestarts
+                step_size,
+                numrestarts
             )
 
-            max_mx = max(max_mx, mx.item())
+            max_mx = max(max_mx, mx.max().item())
 
         if k>0:
             max_mx = max(max_mx, p_moc[k-1])

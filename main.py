@@ -14,12 +14,16 @@ np.random.seed(0)
 torch.manual_seed(0)
 
 
-n_points = 5
+n_points = 1000
 nbins=10 #for DMOC grid construction
 norm = "EUCLIDEAN" #refers to d_x
-FUNCTION = "tanh" #choose function to test
+FUNCTION = "sin" #choose function to test
 DOMAIN_MIN = -50.0
 DOMAIN_MAX = 50.0
+batch_size= n_points
+nrestart=1
+M=40
+
 
 def f(x):
 
@@ -124,15 +128,13 @@ t_values = dmoc.tgrid()
 dmax = t_values[-1]
 
 
-
 #gt analytical moc
 gt_moc = analytical_moc(t_values)
-
 
 #compute PGD-moc (p_moc)
 start_time = time.time()
 
-p_moc = pgd_moc(
+p_moc, _ = pgd_moc(
     f, #f_\theta
     X_torch,
     Y_torch, #either f_\theta(X) or original labels for X
@@ -140,20 +142,20 @@ p_moc = pgd_moc(
     box_clipping,
     "L2", #L2, L1, Linf
     t_values, #t_1,...,t_K
+    None, 
+    M,
+    nrestart,
+    nbins,
+    batch_size
 )
 
-
 pgd_t = time.time() - start_time
-
 print(f"DMOC time:    {data_t:.6f} s")
 print(f"PGD-MOC time: {pgd_t:.6f} s")
 
 
 #plots
-
 plt.figure(figsize=(8, 5))
-
-
 plt.plot(
     t_values,
     c_moc,
@@ -191,4 +193,5 @@ plt.legend()
 plt.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.show()
+
+plt.savefig(f'{FUNCTION}_{norm}_{n_points}_{nbins}.png')
