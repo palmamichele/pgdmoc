@@ -100,7 +100,7 @@ def pgd_m_x(
     t,
     dy_f, #
     norm,
-    clipping_f,
+    clipping_f=None,
     M=40,
     step_size=None,
     n_restarts=1
@@ -170,7 +170,9 @@ def pgd_m_x(
 
         #PGD
         for _ in range(M):
-            adv_x = clipping_f(x+delta)
+
+            if clipping_f!= None:
+                adv_x = clipping_f(x+delta)
             adv_output = model(adv_x)
          
             #adv_x.requires_grad_(True)
@@ -207,13 +209,15 @@ def pgd_m_x(
                 # adv_x = project_linf(adv_x, x, t)
                 # delta_new = adv_x - x
 
-            adv_x =clipping_f(adv_x)
+            if clipping_f!=None:
+                adv_x =clipping_f(adv_x)
             delta = adv_x-x
             delta = delta.detach().requires_grad_(True)
             
         
         with torch.no_grad():
-            adv_x = clipping_f(x + delta)
+            if clipping_f!= None:
+                adv_x = clipping_f(x + delta)
             delta = adv_x - x
             value = dy_f(model(adv_x), y)
 
@@ -232,8 +236,8 @@ def pgd_moc(
     X,
     Y, #either f_\theta(X) or original labels for X
     dy_f, #d_Y as loss function (assuming it satisfies metric properties)
-    clipping_f,
-    norm, #L2, L1, Linf
+    clipping_f=None,
+    norm="L2", #L2, L1, Linf
     t_values=None, #t_1,...,t_K
     step_size=None, 
     numiter=1,
