@@ -173,6 +173,8 @@ def pgd_m_x(
 
             if clipping_f!= None:
                 adv_x = clipping_f(x+delta)
+            else:
+                adv_x = x + delta
             adv_output = model(adv_x)
          
             #adv_x.requires_grad_(True)
@@ -211,6 +213,8 @@ def pgd_m_x(
 
             if clipping_f!=None:
                 adv_x =clipping_f(adv_x)
+            else:
+                adv_x = x + delta
             delta = adv_x-x
             delta = delta.detach().requires_grad_(True)
             
@@ -218,6 +222,8 @@ def pgd_m_x(
         with torch.no_grad():
             if clipping_f!= None:
                 adv_x = clipping_f(x + delta)
+            else:
+                adv_x = x + delta
             delta = adv_x - x
             value = dy_f(model(adv_x), y)
 
