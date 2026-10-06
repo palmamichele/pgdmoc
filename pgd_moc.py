@@ -110,7 +110,7 @@ def pgd_m_x(
     
     y: a batch of datapoints, can be either network output on x i.e. model(x), or original label value for x 
     
-    dy_f: needs to return per-example values.
+    dy_f: needs to return per-example values. dy_f, and model are separable across observations
 
     M: int, the number of steps for PGD
 
