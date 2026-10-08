@@ -119,6 +119,7 @@ def pgd_m_x(
     Notice if y is original value for x, and dy_f is the (criterion) loss function, this just reduces to usual PGD-Attack.
     More generally, this can be used in pgd_moc to compute a moc, under the assumption that dy_f is a metric.  
 
+    This function is deliberately not differentiable wrt network parameters.
     
     """
 
@@ -186,9 +187,12 @@ def pgd_m_x(
                     f"got {tuple(objective.shape)}"
                 )
 
+
             grad = torch.autograd.grad(
                 objective.sum(),
-                delta
+                delta,
+                retain_graph=False,
+                create_graph=False
             )[0]
 
             #gradient of each example's objective w.r.t. its own delta assuming examples are independent
@@ -213,17 +217,15 @@ def pgd_m_x(
 
             if clipping_f!=None:
                 adv_x =clipping_f(adv_x)
-            else:
-                adv_x = x + delta
+
             delta = adv_x-x
-            delta = delta.detach().requires_grad_(True)
+            delta = delta.detach().requires_grad_(True) #we do not construct a graph through the PGD
             
         
         with torch.no_grad():
             if clipping_f!= None:
                 adv_x = clipping_f(x + delta)
-            else:
-                adv_x = x + delta
+            
             delta = adv_x - x
             value = dy_f(model(adv_x), y)
 
@@ -234,7 +236,74 @@ def pgd_m_x(
         best_value[mask] = value[mask]
         best_delta[mask] = delta.detach()[mask]
 
-    return best_value, best_delta
+    return best_value.detach(), best_delta.detach()
+
+
+
+def make_t_grid(
+    X,
+    norm="L2",
+    t_values=None,
+    nbins=100
+):
+    """
+    Construct the grid of radii t.
+
+    If t_values is None:
+        construct a logarithmic grid from a very small
+        positive number to the diameter of X.
+
+    If len(t_values) == 2:
+        interpret them as [lower, upper] and construct
+        a logarithmic grid between them.
+    """
+
+    if norm == "L1":
+        p = 1
+    elif norm == "L2":
+        p = 2
+    elif norm == "Linf":
+        p = np.inf
+    else:
+        raise ValueError(
+            f"Unsupported norm: {norm}"
+        )
+
+
+    if t_values is None:
+        #by default we use a logarithmically spaced grid
+        delta_X = X.max(dim=0).values - X.min(dim=0).values
+
+        if p == np.inf:
+            TX_ = delta_X.abs().max().item()
+        else:
+            TX_ = torch.linalg.vector_norm(delta_X,ord=p).item()
+
+
+        qX_ = np.nextafter(0, 1)
+        log_qX = np.log(qX_)
+        log_TX = np.log(TX_)
+        log_step = (log_TX - log_qX) / (nbins - 1)
+
+        t_values = np.exp(log_qX + np.arange(nbins) * log_step)
+        t_values[0] = qX_
+        t_values[-1] = TX_
+
+    elif len(t_values)==2:
+        TX_ = t_values[1]
+        qX_ = t_values[0]
+    
+        log_qX = np.log(qX_)
+        log_TX = np.log(TX_)
+        log_step = (log_TX - log_qX) / (nbins - 1)
+
+        t_values = np.exp(log_qX + np.arange(nbins) * log_step)
+        t_values[0] = qX_
+        t_values[-1] = TX_
+
+        
+    return t_values
+
 
 
 def pgd_moc(
@@ -262,44 +331,9 @@ def pgd_moc(
     """
     #put lower and upper bounds on the grid, and number of bins
 
-    if norm=="L1":
-        p=1
-    elif norm=="L2":
-        p=2
-    elif norm=="Linf":
-        p=np.inf
-    else:
-        raise Exception(f"Sorry, no implementation for the specified norm: {norm}")
+    t_values = make_t_grid(X=X,norm=norm,t_values=t_values,nbins=nbins)
 
-    
-    if t_values is None:
-        #by default we use a logarithmically spaced grid
-        delta = X.max(dim=0).values - X.min(dim=0).values
-        TX_ = torch.linalg.vector_norm(delta, ord=p).item()
-        qX_ = np.nextafter(0, 1)
-    
-        log_qX = np.log(qX_)
-        log_TX = np.log(TX_)
-        log_step = (log_TX - log_qX) / (nbins - 1)
 
-        t_values = np.exp(log_qX + np.arange(nbins) * log_step)
-        t_values[0] = qX_
-        t_values[-1] = TX_
-
-    elif len(t_values)==2:
-        TX_ = t_values[1]
-        qX_ = t_values[0]
-    
-        log_qX = np.log(qX_)
-        log_TX = np.log(TX_)
-        log_step = (log_TX - log_qX) / (nbins - 1)
-
-        t_values = np.exp(log_qX + np.arange(nbins) * log_step)
-        t_values[0] = qX_
-        t_values[-1] = TX_
-
-        
-    
     p_moc = []
 
     for k, t in enumerate(t_values):
@@ -311,7 +345,7 @@ def pgd_moc(
             x = X[i:i+batch_size]
             y = Y[i:i+batch_size]
 
-            mx, delta = pgd_m_x(
+            mx, _ = pgd_m_x(
                 model,
                 x,
                 y,
@@ -332,3 +366,106 @@ def pgd_moc(
         p_moc.append(max_mx)
 
     return np.array(p_moc), np.array(t_values)
+
+
+
+
+def moc_regularizer(
+    model,
+    X,
+    dy_f,
+    norm="L2",
+    t_values=None,
+    clipping_f=None,
+    step_size=None,
+    num_iter=40,
+    num_restarts=1,
+    nbins=100,
+    batch_size=1,
+):
+    """
+    Compute a differentiable approximation of
+
+        sum_t omega_theta(t)
+    """
+
+
+    t_values = make_t_grid(
+        X=X,
+        norm=norm,
+        t_values=t_values,
+        nbins=nbins
+    )
+
+    omega_values = []
+
+    for t in t_values:
+
+        # We will accumulate the differentiable
+        # per-example MOC values over ALL X.
+        all_moc_values = []
+
+
+        for i in range(0,X.shape[0],batch_size):
+
+            x = X[i:i + batch_size]
+
+            #during PGD, f_theta(x) is fixed.
+            with torch.no_grad():
+                y = model(x)
+
+
+            _, delta = pgd_m_x(
+                model=model,
+                x=x,
+                y=y,
+                t=float(t),
+                dy_f=dy_f,
+                norm=norm,
+                clipping_f=clipping_f,
+                M=num_iter,
+                step_size=step_size,
+                n_restarts=num_restarts,
+            )
+
+            #treat the approximate maximizer as fixed for the outer derivative.
+
+            delta = delta.detach()
+            clean_output = model(x)
+
+            if clipping_f is not None:
+                adv_x = clipping_f(x + delta)
+            else:
+                adv_x = x + delta
+
+            adv_output = model(adv_x)
+
+            moc_per_example = dy_f(adv_output,clean_output)
+
+            if (moc_per_example.ndim != 1 or moc_per_example.shape[0] != x.shape[0]):
+                raise ValueError(
+                    "dy_f must return one value per example. "
+                    f"Got {tuple(moc_per_example.shape)}"
+                )
+
+            all_moc_values.append(
+                moc_per_example
+            )
+
+
+        all_moc_values = torch.cat(
+            all_moc_values,
+            dim=0
+        )
+
+        omega_t = all_moc_values.max()
+
+        #omega_t is still connected to theta.
+        omega_values.append(omega_t)
+
+
+    moc_regularizer_value = torch.stack(
+        omega_values
+    ).sum()
+
+    return moc_regularizer_value, omega_values, t_values
