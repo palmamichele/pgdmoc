@@ -380,8 +380,7 @@ def moc_regularizer(
     step_size=None,
     num_iter=40,
     num_restarts=1,
-    nbins=100,
-    batch_size=1,
+    nbins=100
 ):
     """
     Compute a differentiable approximation of
@@ -399,73 +398,53 @@ def moc_regularizer(
 
     omega_values = []
 
+    clean_output = model(X)
+    y= clean_output.detach()
+
     for t in t_values:
 
-        # We will accumulate the differentiable
+        # accumulate the differentiable
         # per-example MOC values over ALL X.
         all_moc_values = []
 
 
-        for i in range(0,X.shape[0],batch_size):
-
-            x = X[i:i + batch_size]
-
-            #during PGD, f_theta(x) is fixed.
-            with torch.no_grad():
-                y = model(x)
-
-
-            _, delta = pgd_m_x(
-                model=model,
-                x=x,
-                y=y,
-                t=float(t),
-                dy_f=dy_f,
-                norm=norm,
-                clipping_f=clipping_f,
-                M=num_iter,
-                step_size=step_size,
-                n_restarts=num_restarts,
-            )
-
-            #treat the approximate maximizer as fixed for the outer derivative.
-
-            delta = delta.detach()
-            clean_output = model(x)
-
-            if clipping_f is not None:
-                adv_x = clipping_f(x + delta)
-            else:
-                adv_x = x + delta
-
-            adv_output = model(adv_x)
-
-            moc_per_example = dy_f(adv_output,clean_output)
-
-            if (moc_per_example.ndim != 1 or moc_per_example.shape[0] != x.shape[0]):
-                raise ValueError(
-                    "dy_f must return one value per example. "
-                    f"Got {tuple(moc_per_example.shape)}"
-                )
-
-            all_moc_values.append(
-                moc_per_example
-            )
-
-
-        all_moc_values = torch.cat(
-            all_moc_values,
-            dim=0
+        #during PGD, f_theta(x) is fixed.
+    
+        _, delta = pgd_m_x(
+            model=model,
+            x=X,
+            y=y,
+            t=float(t),
+            dy_f=dy_f,
+            norm=norm,
+            clipping_f=clipping_f,
+            M=num_iter,
+            step_size=step_size,
+            n_restarts=num_restarts,
         )
 
-        omega_t = all_moc_values.max()
+        #treat the approximate maximizer as fixed for the outer derivative.
 
-        #omega_t is still connected to theta.
-        omega_values.append(omega_t)
+        delta = delta.detach()
+
+        if clipping_f is not None:
+            adv_x = clipping_f(X + delta)
+        else:
+            adv_x = X + delta
+
+        adv_output = model(adv_x)
+
+        moc_per_example = dy_f(adv_output,clean_output)
+
+        if (moc_per_example.ndim != 1 or moc_per_example.shape[0] != len(X)):
+            raise ValueError(
+                "dy_f must return one value per example. "
+                f"Got {tuple(moc_per_example.shape)}"
+            )
+
+        omega_values.append(moc_per_example.max())
 
 
-    moc_regularizer_value = torch.stack(
-        omega_values
-    ).sum()
+    moc_regularizer_value = torch.stack(omega_values).sum()
 
     return moc_regularizer_value, omega_values, t_values
